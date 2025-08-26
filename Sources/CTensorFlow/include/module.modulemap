@@ -1,0 +1,5 @@
+module CTensorFlow [system] {
+  header "shims.h"
+  link "tensorflow"
+  export *
+}

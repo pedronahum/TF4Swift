@@ -1,0 +1,6 @@
+.swiftpm/
+.build/
+.DS_Store
+.vscode/
+.idea/
+.env
