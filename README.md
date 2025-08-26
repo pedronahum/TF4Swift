@@ -179,28 +179,9 @@ We’re starting small and iterating. Expect breaking changes while we find the 
 
 ## License
 
-**Apache License, Version 2.0** — recommended for this project.  
+**Apache License, Version 2.0** 
 You’ll find the license text in `LICENSE` at the repo root. Contributions are assumed to be licensed under Apache-2.0 unless stated otherwise.
 
-> Add a `LICENSE` file with the standard Apache 2.0 text and a `NOTICE` file if needed (attribution statements). A typical copyright header:
->
-> ```
-> Copyright 2025 The TF4Swift Authors
->
-> Licensed under the Apache License, Version 2.0 (the "License");
-> you may not use this file except in compliance with the License.
-> You may obtain a copy of the License at
->
->     http://www.apache.org/licenses/LICENSE-2.0
->
-> Unless required by applicable law or agreed to in writing, software
-> distributed under the License is distributed on an "AS IS" BASIS,
-> WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-> See the License for the specific language governing permissions and
-> limitations under the License.
-> ```
-
----
 
 ## Contributing
 
