@@ -111,5 +111,15 @@ let package = Package(
                 ], .when(platforms: [.macOS]))
             ]
         ),
+
+        // Add this alongside your existing testTarget("TF4SwiftCoreTests", ...)
+.testTarget(
+    name: "TF4SwiftOpGenTests",
+    dependencies: ["TF4SwiftOpGen"],
+    path: "Tests/TF4SwiftOpGenTests"
+),
+
+
+
     ]
 )

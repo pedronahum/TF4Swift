@@ -1,94 +1,83 @@
-# TF4Swift — TensorFlow for Swift (experimental)
+# TF4Swift — TensorFlow Eager in Swift (experimental)
 
-> **Status:** 🚧 Experimental & subject to change.  
-> This project explores a modern, type-safe Swift interface to TensorFlow’s C & Eager APIs, plus early automatic differentiation (AD) integration in Swift 6.2 development toolchains.
+> **Status:** early prototype. The API surface, module layout, and code generator are **subject to change** at any time. PRs welcome!
 
----
+TF4Swift is a lightweight Swift wrapper around the TensorFlow **C Eager** runtime plus a code‑generated set of Swift ops and hand‑rolled automatic differentiation (AD) shims for a growing subset of math/NN primitives.
 
-## Why TensorFlow for Swift?
+The **north star** for this project is the original **[swift-apis]** effort from the Swift for TensorFlow era: a clean, Swift‑first API layered over TensorFlow. Swift itself and the AD story have evolved since then; we’re also informed by the excellent **PassiveLogic Differentiable Swift** work and the ongoing language discussions in the Swift forums. Taken together, these let us re-think the layering and deliver a modern, pragmatic library that’s easy to build and hack on today.
 
-Swift gives us:
-- **Type safety & ergonomics** — expressive generics and protocol constraints (e.g., `TensorFlowScalar`, `TensorFlowNumeric`, `TensorFlowFloatingPoint`) make invalid combinations harder to write and easier to catch at compile time.
-- **Great tooling** — SwiftPM, the new `swift-testing` library, first-class async/actors (future direction for device/runtime management).
-- **AD in the language toolchain** — Swift 6.2 dev includes reverse-mode differentiation attributes. We can declare `@differentiable(reverse)` entry points and provide custom VJPs that call TensorFlow’s gradient kernels.
+- swift-apis: https://github.com/tensorflow/swift-apis  
+- Differentiable Swift updates:  
+  • https://forums.swift.org/t/ongoing-work-on-differentiable-swift/57780  
+  • https://forums.swift.org/t/status-update-on-the-differentiable-swift-language-feature/79805  
+  • Examples: https://github.com/PassiveLogic/differentiable-swift-examples
 
-TensorFlow gives us:
-- **Battle-tested kernels and devices** — you call into the existing C/Eager runtime and ops (CPU/GPU/accelerators where available).
-- **Broad operator coverage** — we can generate most wrappers directly from TensorFlow’s `ops.pbtxt`.
-
-Together, this aims to be a practical “Swift-first” experience on top of TensorFlow while preserving Swift’s design principles.
 
 ---
 
-## What works today (MVP)
+## Why TF4Swift?
 
-- A small **C shim** (`CTensorFlow`) over the TensorFlow C & Eager API (plus string helpers), linked against your system `libtensorflow`.
-- **Core Swift API** (`TF4SwiftCore`): eager `Tensor`, `EagerContext`, a fluent `Ops` builder, and dtype protocols.
-- **Op generator** (`tf4swift-opgen`) that reads `tensorflow/core/ops/ops.pbtxt` and emits Swift wrappers. We currently generate:
-  - `AddV2` (numeric), `Relu` (floating-point), `ReluGrad` + Swift AD glue for `relu(_:)`.
-- **Swift AD integration**: floating `Tensor<T>` conforms to `Differentiable`; we expose a differentiable `relu` with a pullback implemented by TensorFlow’s `ReluGrad`.
-
-> Manifest at a glance: products `TF4SwiftCore`, `TF4SwiftOps`, and tool `tf4swift-opgen`; the manifest wires header search paths and rpaths for `libtensorflow`. See `Package.swift` for details. fileciteturn0file0 fileciteturn0file1
+- **Low friction**: buildable with the stock Swift toolchain + Homebrew `libtensorflow` on macOS/arm64.
+- **Familiar API**: `Tensor<T>` types, `Ops` builder, and a `_Raw` namespace for non-throwing convenience.
+- **AD from day one**: `relu`, `sigmoid`, and `tanh` expose reverse‑mode derivatives that compose with Swift’s `@differentiable` / pullback APIs.
+- **Code generation**: Swift wrappers are emitted directly from TensorFlow’s `ops.pbtxt`, including defaulted attributes (e.g., `MatMul(transposeA: Bool = false, transposeB: Bool = false)`).
+- **Opinionated but modular**: the generator writes small per‑op files grouped by domain (Math / NN / Array) under `Sources/TF4SwiftOps/Generated`.
 
 ---
 
-## Repository layout
+## Current capabilities
 
-```
-TF4Swift/
-├─ Sources/
-│  ├─ CTensorFlow/           # C headers & shims over TF C/Eager + tiny helpers
-│  ├─ TF4SwiftCore/          # Public Swift API: Tensor, Ops, EagerContext, dtype protocols
-│  ├─ TF4SwiftOps/           # Generated high-level op wrappers (one file per op)
-│  └─ TF4SwiftOpGen/         # Code generator tool (parses ops.pbtxt, emits Swift)
-└─ Tests/
-   └─ TF4SwiftCoreTests/     # swift-testing based tests (eager, ops, AD)
-```
+- **Core**: Eager context & device listing, `Tensor` creation from scalars/arrays, shape queries, simple broadcasting utilities, diagnostics with enriched TF error messages (op name/device).
+- **Ops (generated)**: `AddV2`, `Mul`, `MatMul` (with defaulted transpose flags), `Relu`, `Sigmoid`, `Tanh` (+ `ReluGrad`, `SigmoidGrad`, `TanhGrad` behind `_Raw` for AD plumbing).
+- **AD**: Hand‑written `@derivative` wrappers for `relu`, `sigmoid`, `tanh` that call the TF gradient kernels and adapt to Swift’s `TangentVector`.
+- **Tests**: end‑to‑end eager tests, broadcasting checks, and **golden tests** for the generator (verifying emitted signatures & builder calls). All pass on macOS/arm64 with Homebrew TF as of the latest commit.
 
 ---
 
-## Getting started
+## Quick start
 
 ### Prerequisites
 
-- macOS 13+ (Apple Silicon recommended)
-- Swift 6.2 **development** toolchain (or newer)
-- TensorFlow C library installed (e.g., Homebrew `libtensorflow`)
-- Environment variables telling the build where headers & libs live:
+- macOS 13+ (Ventura) with Xcode command line tools
+- Swift 6.2 toolchain (package uses `// swift-tools-version: 6.2`)
+- Homebrew TensorFlow C runtime:
 
 ```bash
-export LIBTENSORFLOW_INCLUDEDIR=/opt/homebrew/opt/libtensorflow/include
-export LIBTENSORFLOW_LIBDIR=/opt/homebrew/opt/libtensorflow/lib
+brew install libtensorflow
+# Optional: override include/lib dirs if not using Homebrew defaults
+export LIBTENSORFLOW_INCLUDEDIR="/opt/homebrew/opt/libtensorflow/include"
+export LIBTENSORFLOW_LIBDIR="/opt/homebrew/opt/libtensorflow/lib"
 ```
 
-### Build
+### Build & test
 
 ```bash
+# From repo root
 swift build -c release
+swift test
 ```
 
-### Run the op generator
-
-Place `ops.pbtxt` in `Sources/TF4SwiftOpGen/` (or set `TF_OPS_PBTXT`), then:
+### Regenerate Swift op wrappers
 
 ```bash
+# Wipe old generated sources (safe: only generated files live in this folder)
+rm -rf Sources/TF4SwiftOps/Generated
+
+# Rebuild the op generator and emit wrappers
 swift run -c release tf4swift-opgen
-# Generates Swift files under Sources/TF4SwiftOps/Generated/
+
+# Rebuild & test with the new sources
+swift build -c release
+swift test
 ```
 
-### Test
-
-```bash
-swift test -v
-```
-
-> If your tests import `TF4SwiftOps`, make sure the test target depends on that product in `Package.swift`.
+> If the generator can’t find `ops.pbtxt`, ensure it’s present at `Sources/TF4SwiftOpGen/ops.pbtxt`. The tool prints the resolved path on startup.
 
 ---
 
-## Usage snippets
+## Usage examples
 
-### Eager add & ReLU
+### Elementwise add
 
 ```swift
 import TF4SwiftCore
@@ -97,96 +86,161 @@ import TF4SwiftOps
 let ctx = try EagerContext()
 let ops = Ops(ctx)
 
-let a = try Tensor<Float>(3.0)
-let b = try Tensor<Float>(4.0)
-let c = try ops.add(a, b)         // 7.0
-
-let x = try Tensor<Float>([-1, 0, 2])
-let y = try ops.relu(x)           // [0, 0, 2]
+let a = try Tensor<Float>([1, 2, 3, 4])
+let b = try Tensor<Float>([10, 20, 30, 40])
+let c = try ops.add(a, b)
+print(try c.shape(), c.array)  // [4] [11, 22, 33, 44]
 ```
 
-### AD with a custom VJP backed by TF grads (Swift 6.2 dev)
+### MatMul with defaults
 
 ```swift
-import _Differentiation
-import TF4SwiftCore
-import TF4SwiftOps
+let a = try Tensor<Float>.fromArray([1,2,3,4,5,6], shape: [2,3])
+let b = try Tensor<Float>.fromArray([7,8,9,10,11,12], shape: [3,2])
+let c = try ops.matmul(a, b)  // transpose flags default to false
+print(try c.shape())          // [2, 2]
+```
 
-let x = try Tensor<Float>([-1, 0, 2])
-let (y, pb) = valueWithPullback(at: x, of: relu)
-let seed = try Tensor<Float>([1, 1, 1]) // upstream cotangent
-let grad = pb(.init(seed)).base!        // [0, 0, 1]
+### Differentiation: `sigmoid` and `tanh`
+
+```swift
+@differentiable(reverse) func f(_ x: Tensor<Float>) -> Tensor<Float> {
+    sigmoid(x) + tanh(x)
+}
+
+let x = try Tensor<Float>(0.0)
+let (y, pb) = valueWithPullback(at: x, of: f)
+
+let seed = Tensor<Float>.TangentVector(try Tensor<Float>(1.0))
+let g = pb(seed)
+print(y.scalar)   // ~1.5
+print(g.base!)    // ~1.25 at x=0 (sigmoid’=0.25, tanh’=1.0)
 ```
 
 ---
 
-## Roadmap & milestones
+## Repository layout
 
-We’re starting small and iterating. Expect breaking changes while we find the right shapes and protocols.
-
-### Phase 0 – Housekeeping (quick wins)
-- Ensure tests that import `TF4SwiftOps` declare a dependency on it.
-- Lock in AD attribute & pullback conventions.
-
-### Phase 1 – Core API hardening
-- Tensor creation (ND initializers, zeros/ones/like, random, range/linspace).
-- Device/runtime ergonomics (`EagerContext` lifecycle, device lists, per-op placement).
-- Error surface & diagnostics (clear messages on dtype/shape mismatches).
-- Memory safety audit (correct deletion of handles in all paths).
-- Protocol lattice finalization (`TensorFlowScalar/Numeric/FloatingPoint/Integer/Index`).
-
-**Acceptance:** shape/dtype tests, broadcast checks, device smoke tests.
-
-### Phase 2 – Production-ready op generation
-- Robust parsing of `ops.pbtxt` (`type_attr`, lists, shapes, allowed dtypes).
-- Protocol binding from attr constraints (float-only, integer-only, numeric, scalar).
-- Input lists, multi-output ops (tuple returns with labels).
-- Attribute setters (int/float/bool/string/dtype/shape).
-- Grad pair detection + optional AD glue for a **whitelist** (ReLU/Sigmoid/Tanh, etc.).
-- File-per-op generation under `TF4SwiftOps/Generated/`.
-
-**Acceptance:** autogen coverage for `AddV2`, `Relu`, `ReluGrad`, `Mul`, `Sub`, `Neg`, `MatMul`, `Concat`, `Reshape`, `TopKV2`, `Pack`, `Unpack`; unit tests.
-
-### Phase 3 – Differentiation beyond unary activations
-- `Tensor<T>` AD: refine zero tangents (materialize `zerosLike` when shapes known).
-- AD rules for binary ops (`add/sub/mul/div`) and reductions (`sum/mean/max`).
-- Broadcasting-aware VJPs; finite-difference checks in tests.
-
-**Acceptance:** numeric vs. AD agreement on random small tensors.
-
-### Phase 4 – DX, CI, docs
-- `swift-testing` property tests; end-to-end generator/build/test pipeline.
-- `swift-format` for both handwritten and generated sources.
-- CI matrix (macOS 13+/15, Swift 6.2 dev) building core → generator → ops → tests.
-- Examples: eager basics, a tiny training loop once we add more grads.
-
-### Nice-to-have tracks (in parallel)
-- String tensors (`TF_TString`-backed `StringTensor` type).
-- SavedModel/graph mode exploration.
-- Performance (context reuse, op caching, fused kernels).
-- Device utilities (explicit CPU/GPU selection, soft-placement).
+```
+Sources/
+  CTensorFlow/            # C shim for TensorFlow C & Eager (headers under include/)
+  TF4SwiftCore/           # Public Swift API: EagerContext, Tensor, Ops builder, utilities
+  TF4SwiftOps/            # Ops surface (depends on Core)
+    _Raw.swift            # non-throwing convenience + AD helpers
+    Generated/            # (codegen) organized by domain: Math/ NN/ Array/ ...
+  TF4SwiftOpGen/          # Op generator tool (parsing ops.pbtxt, emitting Swift)
+Tests/
+  TF4SwiftCoreTests/      # Eager, broadcasting, AD, and runtime smoke tests
+  TF4SwiftOpGenTests/     # Golden tests for the generator
+```
 
 ---
 
-## Next steps
+## Roadmap
 
-1. **Expand generator** to handle input lists, multi-outputs, and attr binding from `allowed_values`.
-2. **Add array initializers** (shape inference) and broadcasting tests.
-3. **Add VJPs** for `AddV2` and `Mul`; compare to finite differences in tests.
-4. **Wire CI** that runs: build → opgen → build ops → test.
+**✅ PR‑1 — Eager core & minimal ops**
+- EagerContext + device listing (CPU expected)
+- Tensor creation from scalars/arrays, shape helpers
+- Hand‑written `Ops.add` (temporary)
+- Smoke tests
+
+**✅ PR‑2 — _Raw namespace & ReLU AD**
+- `_Raw` non‑throwing conveniences
+- Generated `AddV2` wrapper, diagnostics with op name/device
+- `relu` + `ReluGrad` AD shims
+
+**✅ PR‑3 — Attribute coverage + defaults + polish (OpGen)**
+- Generator supports attr types: `bool`, `int`, `float`, `type`, `shape`, `string` (+ simple lists)
+- `default_value` parsing surfaced as defaulted Swift params
+- Consistent naming from TF arg/attr names
+- File splitting by domain (Math/NN/Array)
+- Golden tests for `MatMul` (transpose flags) and runtime tests
+- Added `sigmoid` / `tanh` + gradient plumbing
+
+**🔜 PR‑4 — Broader op surface**
+- Arithmetic: `Sub`, `Div`, `Pow`, `Mean`, `Sum` (axes/keepDims attrs)
+- Array: `Reshape`, `Concat`, `Slice`, `Gather`, `Pad`
+- NN: `Conv2D` (+ attrs: strides, dilations, padding), `BiasAdd`
+
+**🔜 PR‑5 — Higher‑level APIs**
+- Simple layers (`Dense`, `Conv2D`) and an SGD/Adam training loop
+- Model/Module protocol with parameter collections
+
+**🔜 PR‑6 — UX & perf**
+- Error surfaces and debug logs
+- Basic benchmarking; vectorized paths where possible
+
+**🔜 PR‑7 — Portability & CI**
+- Linux support (Ubuntu + TF prebuilt)
+- GitHub Actions CI: build & run tests
+- Prebuilt artifacts for the opgen
+
+**North‑star (post‑MVP)**
+- Typed shapes where ergonomic, dataset utilities, export/import helpers, and a clean story for custom ops.
+
+---
+
+## Production‑readiness checklist
+
+- [ ] Expand generated op coverage (see PR‑4)
+- [ ] Gradients for common ops; audit correctness via numeric checks
+- [ ] Memory/lifetime audits around `TFE_TensorHandle*`
+- [ ] Concurrency & Sendable annotations as needed
+- [ ] Linux CI + documentation examples
+- [ ] API review for source stability
+- [ ] Versioning + semantic tags
+
+---
+
+## Troubleshooting
+
+- **Duplicate rpath warnings**: benign on macOS; we embed multiple candidates for convenience.
+- **`ops.pbtxt` not found**: ensure it exists under `Sources/TF4SwiftOpGen/ops.pbtxt`. Running `swift run -c release tf4swift-opgen` should print the resolved path.
+- **“value of type 'Ops' has no member 'add'”**: make sure generated sources are present under `Sources/TF4SwiftOps/Generated` and that `_Raw.swift` routes through `Ops` methods with the expected signatures.
+- **AD complaints (“expression is not differentiable”)**: only call the public `relu/sigmoid/tanh` that are marked `@differentiable`. The `_Raw` helpers are intentionally not differentiated.
+
+---
+
+## Contributing
+
+- Run `swift test` before submitting PRs.
+- For new ops: extend the generator when possible; avoid hand‑written wrappers unless the op requires special Swift surface.
+- Keep generated files in `Sources/TF4SwiftOps/Generated` only; do not edit them by hand.
+- Add tests (runtime or golden) alongside new functionality.
 
 ---
 
 ## License
 
-**Apache License, Version 2.0** 
-You’ll find the license text in `LICENSE` at the repo root. Contributions are assumed to be licensed under Apache-2.0 unless stated otherwise.
-
-
-## Contributing
-
-This is an early, fast-moving experiment. Issues, design notes, and small PRs are welcome. Please open an issue before larger refactors so we can agree on direction (especially around AD semantics and codegen).
+This project is licensed under the **Apache License 2.0**. See `LICENSE` for details. Contributions are accepted under the same license.
 
 ---
 
+## Git: create a commit and push to GitHub
 
+1) Initialize (only once):
+```bash
+git init
+git add .
+git commit -m "TF4Swift: core, opgen (attrs+defaults), AD for relu/sigmoid/tanh, tests"
+```
+
+2) Create a new GitHub repo (via UI), then set it as `origin` and push:
+```bash
+git branch -M main
+git remote add origin https://github.com/<your-user>/TF4Swift.git
+git push -u origin main
+```
+
+3) For subsequent changes:
+```bash
+git add -A
+git commit -m "Describe the change briefly"
+git push
+```
+
+---
+
+## Acknowledgements
+
+Built on the shoulders of TensorFlow, Swift for TensorFlow alumni, and the Swift community advancing differentiable Swift.

@@ -13,17 +13,32 @@ public struct Ops {
 
     public func build(_ name: String) -> OpBuilder { OpBuilder(ctx: ctx, name: name) }
 
-    // Example hand-written op (useful until codegen is in place)
-    public func add<T: TensorFlowScalar>(_ x: Tensor<T>, _ y: Tensor<T>, device: String? = nil) throws -> Tensor<T> {
+}
+
+#if DEBUG && DEBUG_BROADCAST_CHECKS
+extension Ops {
+    /// DEBUG-only helper: add with host-side broadcasting preflight.
+    /// Kept `internal` so there is no collision with TF4SwiftOps' public `add`.
+    @usableFromInline
+    internal func _addWithPreflight<T: TensorFlowNumeric>(
+        _ x: Tensor<T>, _ y: Tensor<T>, device: String? = nil
+    ) throws -> Tensor<T> {
+        // Host-side broadcast check for nicer debug-time errors
+        let sx = try x.shape()
+        let sy = try y.shape()
+        _ = try broadcastedShape(sx, sy)  // throws BroadcastError on mismatch
+
         let outs = try build("AddV2")
             .device(device)
             .addInput(x)
             .addInput(y)
             .attr("T", dtype: T.tfDataType)
             .execute(outputs: 1)
-        return Tensor<T>(ownedHandle: outs[0])
+        return Tensor<T>.fromOwnedHandle(outs[0])
     }
 }
+#endif
+
 
 /// Minimal imperative builder API your generator will target.
 public final class OpBuilder {
@@ -145,15 +160,38 @@ public final class OpBuilder {
     }
 
     // MARK: - Execute
+    public func execute(outputs count: Int) throws -> [OpaquePointer] {
+    var numOuts: Int32 = Int32(count)
+    var outs = [OpaquePointer?](repeating: nil, count: count)
 
-    /// Execute and return `n` output handles.
-    public func execute(outputs n: Int32 = 1) throws -> [OpaquePointer] {
-        var nOut = n
-        var outs: [OpaquePointer?] = Array(repeating: nil, count: Int(n))
-        TFE_Execute(op, &outs, &nOut, st.ptr)
+    // Execute the op.
+    TFE_Execute(op, &outs, &numOuts, st.ptr)
+
+    // If TF reported an error, decorate it with op/device info.
+    do {
         try st.throwIfError()
-        return outs.map { $0! } // TF guarantees filled outputs on success
+    } catch TensorFlowError.status(let code, let tfMsg) {
+        // Best-effort device and op name for diagnostics.
+        var deviceStr = "unspecified"
+        if let devCStr = TFE_OpGetDevice(op, st.ptr) {
+            deviceStr = String(cString: devCStr)
+        }
+        let opName = String(cString: TFE_OpGetName(op, st.ptr))
+
+        let msg = "Op \(opName) on device \(deviceStr) failed: \(tfMsg)"
+        throw TensorFlowError.status(code: code, message: msg)
     }
+
+    // Success: return realized outputs (trim to numOuts).
+    return outs.prefix(Int(numOuts)).map { $0! }
+}
+
+
+       
+
+        
+    
+
 
     deinit {
         TFE_DeleteOp(op)

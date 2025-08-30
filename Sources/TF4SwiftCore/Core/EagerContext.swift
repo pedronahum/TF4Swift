@@ -16,21 +16,3 @@ public final class EagerContext {
     deinit { TFE_DeleteContext(ptr) }
 }
 
-
-public extension EagerContext {
-    func deviceNames() throws -> [String] {
-        let st = TFStatus()
-        let list = TFE_ContextListDevices(self.ptr, st.ptr)!
-        try st.throwIfError()
-        defer { TF_DeleteDeviceList(list) }
-        let count = TF_DeviceListCount(list)
-        var out: [String] = []
-        out.reserveCapacity(Int(count))
-        for i in 0..<count {
-            let cstr = TF_DeviceListName(list, i, st.ptr)
-            try st.throwIfError()
-            out.append(String(cString: cstr!))
-        }
-        return out
-    }
-}
