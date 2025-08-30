@@ -216,31 +216,6 @@ This project is licensed under the **Apache License 2.0**. See `LICENSE` for det
 
 ---
 
-## Git: create a commit and push to GitHub
-
-1) Initialize (only once):
-```bash
-git init
-git add .
-git commit -m "TF4Swift: core, opgen (attrs+defaults), AD for relu/sigmoid/tanh, tests"
-```
-
-2) Create a new GitHub repo (via UI), then set it as `origin` and push:
-```bash
-git branch -M main
-git remote add origin https://github.com/<your-user>/TF4Swift.git
-git push -u origin main
-```
-
-3) For subsequent changes:
-```bash
-git add -A
-git commit -m "Describe the change briefly"
-git push
-```
-
----
-
 ## Acknowledgements
 
 Built on the shoulders of TensorFlow, Swift for TensorFlow alumni, and the Swift community advancing differentiable Swift.
