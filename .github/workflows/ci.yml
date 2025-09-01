@@ -20,19 +20,21 @@ jobs:
         os: [ubuntu-22.04, ubuntu-24.04, macos-15]
         swift: ['6.2']   # add '6.3' when you're ready
 
-    # Keep nvcc/nvc++ from hijacking SPM's C/C++ compiles
     env:
+      # Keep nvcc/nvc++ from hijacking C/C++ compiles under SwiftPM
       CC: clang
       CXX: clang++
       CUDAHOSTCXX: ""
+      # Homebrew QoL
       HOMEBREW_NO_ANALYTICS: "1"
       HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
 
     steps:
       - uses: actions/checkout@v4
 
-      # Swift DEVELOPMENT snapshots (macOS & Linux)
-      # See: https://github.com/marketplace/actions/setup-swift-environment-for-macos-linux-and-windows
+      # Swift DEVELOPMENT snapshot toolchain (macOS & Linux)
       - name: Setup Swift (development snapshot)
         uses: SwiftyLab/setup-swift@v1.11.0
         with:
@@ -47,13 +49,12 @@ jobs:
         run: |
           swift -print-supported-features | (grep -i "differentiable" || true)
 
-      # Enable Brew on Ubuntu runners (preinstalled but not on PATH)
-      # Correct action path: Homebrew/actions/setup-homebrew@main
+      # Enable Homebrew on Ubuntu runners (preinstalled but not on PATH)
       - name: Setup Homebrew (Ubuntu)
         if: startsWith(matrix.os, 'ubuntu-')
         uses: Homebrew/actions/setup-homebrew@main
 
-      # Install TensorFlow C via Homebrew on both OSes and pin to 2.19.0
+      # Install TensorFlow C via Homebrew on both OSes and assert 2.19.0
       - name: Install libtensorflow 2.19.0
         shell: bash
         run: |
@@ -62,17 +63,15 @@ jobs:
           brew install libtensorflow
           PREFIX="$(brew --prefix libtensorflow)"
 
-          # Verify we got exactly 2.19.0 (fail if Homebrew moves ahead)
-          ver=$(brew info --json=v2 libtensorflow | python3 - <<'PY'
-          import sys, json
-          j = json.load(sys.stdin)
-          print(j["formulae"][0]["versions"]["stable"])
-          PY
-          )
+          # Version check without JSON (handles 2.19.0_1 etc.)
+          ver="$(brew list --versions libtensorflow | awk '{print $2}')"
           echo "Installed libtensorflow version: $ver"
-          test "$ver" = "2.19.0"
+          case "$ver" in
+            2.19.0*) : ;;
+            *) echo "ERROR: expected 2.19.0 but got $ver" >&2; exit 1 ;;
+          esac
 
-          # Export for Package.swift (your manifest reads these)
+          # Export for Package.swift (manifest reads these)
           echo "LIBTENSORFLOW_INCLUDEDIR=$PREFIX/include" >> "$GITHUB_ENV"
           echo "LIBTENSORFLOW_LIBDIR=$PREFIX/lib" >> "$GITHUB_ENV"
 
