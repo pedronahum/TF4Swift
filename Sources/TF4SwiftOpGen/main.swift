@@ -1,6 +1,15 @@
 // Sources/TF4SwiftOpGen/main.swift
 import Foundation
 
+ 
+@inline(__always)
+ func eprint(_ message: String) {
+     if let data = (message + "\n").data(using: .utf8) {
+         FileHandle.standardError.write(data)
+     }
+ }
+
+
 private func run() throws {
     // 1) Resolve ops.pbtxt
     guard let url = findOpsPbtxtInBuildProducts() ?? findOpsPbtxtInSources() else {
@@ -48,6 +57,6 @@ private func run() throws {
 do {
     try run()
 } catch {
-    fputs("❌ tf4swift-opgen error: \(error)\n", stderr)
+    eprint("❌ tf4swift-opgen error: \(error)\n")
     exit(1)
 }

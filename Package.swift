@@ -2,10 +2,38 @@
 import PackageDescription
 import Foundation
 
-// Allow overrides via ENV; default to Homebrew paths on macOS (Apple Silicon).
+// Resolve TensorFlow C include/lib locations with sensible per-OS defaults,
+// while allowing LIBTENSORFLOW_INCLUDEDIR / LIBTENSORFLOW_LIBDIR overrides.
 let env = ProcessInfo.processInfo.environment
+
+#if os(Linux)
+let fm = FileManager.default
+let linuxIncludeCandidates: [String] = [
+    env["LIBTENSORFLOW_INCLUDEDIR"],
+    "/usr/local/include",
+    "/usr/include"
+].compactMap { $0 }
+
+let linuxLibCandidates: [String] = [
+    env["LIBTENSORFLOW_LIBDIR"],
+    "/usr/local/lib",
+    "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib/aarch64-linux-gnu"
+].compactMap { $0 }
+
+let tfInclude: String =
+    linuxIncludeCandidates.first { fm.fileExists(atPath: "\($0)/tensorflow/c/c_api.h") }
+    ?? (env["LIBTENSORFLOW_INCLUDEDIR"] ?? "/usr/local/include")
+
+let tfLib: String =
+    linuxLibCandidates.first { fm.fileExists(atPath: "\($0)/libtensorflow.so") }
+    ?? (env["LIBTENSORFLOW_LIBDIR"] ?? "/usr/local/lib")
+
+#else
+// macOS defaults (Apple Silicon Homebrew), but allow overrides via ENV
 let tfInclude = env["LIBTENSORFLOW_INCLUDEDIR"] ?? "/opt/homebrew/opt/libtensorflow/include"
 let tfLib     = env["LIBTENSORFLOW_LIBDIR"]     ?? "/opt/homebrew/opt/libtensorflow/lib"
+#endif
 
 let package = Package(
     name: "TF4Swift",
@@ -18,72 +46,75 @@ let package = Package(
         .executable(name: "tf4swift-opgen", targets: ["TF4SwiftOpGen"]),
     ],
     targets: [
-        // C shim over TensorFlow C & Eager APIs
+        // C shim over TensorFlow C API
         .target(
             name: "CTensorFlow",
-            dependencies: [],
             path: "Sources/CTensorFlow",
             publicHeadersPath: "include",
             cSettings: [
                 .headerSearchPath("include"),
-                // Ensure Clang can find TensorFlow headers
+                // Linux: rely on discovered/include ENV only
+                .unsafeFlags(["-I", tfInclude], .when(platforms: [.linux])),
+                // macOS: keep common Homebrew fallbacks in addition to ENV/default
                 .unsafeFlags([
                     "-I", tfInclude,
-                    "-I", "/opt/homebrew/opt/libtensorflow/include", // Apple Silicon brew
-                    "-I", "/usr/local/opt/libtensorflow/include"     // Intel macOS brew
-                ], .when(platforms: [.macOS, .linux]))
+                    "-I", "/opt/homebrew/opt/libtensorflow/include",
+                    "-I", "/usr/local/opt/libtensorflow/include"
+                ], .when(platforms: [.macOS]))
             ]
         ),
 
-        // Public Swift API over the C layer
+        // Public Swift API
         .target(
             name: "TF4SwiftCore",
             dependencies: ["CTensorFlow"],
             path: "Sources/TF4SwiftCore",
-            // Help Clang importer (when compiling Swift) see TF headers too
+            // Help the Clang importer see TF headers
             swiftSettings: [
+                .unsafeFlags(["-Xcc","-I","-Xcc", tfInclude], .when(platforms: [.linux])),
                 .unsafeFlags([
-                    "-Xcc","-I", "-Xcc", tfInclude,
-                    "-Xcc","-I", "-Xcc", "/opt/homebrew/opt/libtensorflow/include",
-                    "-Xcc","-I", "-Xcc", "/usr/local/opt/libtensorflow/include"
-                ], .when(platforms: [.macOS, .linux]))
+                    "-Xcc","-I","-Xcc", tfInclude,
+                    "-Xcc","-I","-Xcc","/opt/homebrew/opt/libtensorflow/include",
+                    "-Xcc","-I","-Xcc","/usr/local/opt/libtensorflow/include"
+                ], .when(platforms: [.macOS]))
             ],
             linkerSettings: [
-                // Link against libtensorflow; keep rpaths off libraries.
                 .linkedLibrary("tensorflow"),
+                // Library search paths
+                .unsafeFlags(["-L", tfLib], .when(platforms: [.linux])),
                 .unsafeFlags([
                     "-L", tfLib,
                     "-L", "/opt/homebrew/opt/libtensorflow/lib",
                     "-L", "/usr/local/opt/libtensorflow/lib"
-                ], .when(platforms: [.macOS, .linux]))
+                ], .when(platforms: [.macOS]))
             ]
         ),
 
-        // Placeholder for generated op wrappers (keep at least one .swift file here)
+        // Generated op wrappers (placeholder; keep at least one .swift file in dir)
         .target(
             name: "TF4SwiftOps",
             dependencies: ["TF4SwiftCore"],
             path: "Sources/TF4SwiftOps"
         ),
 
-        // Op generator tool (final binary -> embed rpaths here)
+        // Op generator binary — embed rpaths here so it can find libtensorflow at runtime
         .executableTarget(
             name: "TF4SwiftOpGen",
             dependencies: ["TF4SwiftCore"],
             path: "Sources/TF4SwiftOpGen",
             resources: [
-                // Make ops.pbtxt available at runtime as Bundle.module resource
                 .copy("ops.pbtxt")
             ],
             linkerSettings: [
-                // Search paths for the linker
+                // Linker search paths
+                .unsafeFlags(["-L", tfLib], .when(platforms: [.linux])),
                 .unsafeFlags([
                     "-L", tfLib,
                     "-L", "/opt/homebrew/opt/libtensorflow/lib",
                     "-L", "/usr/local/opt/libtensorflow/lib"
-                ], .when(platforms: [.macOS, .linux])),
-
-                // Embed rpaths (swiftc needs -Xlinker form)
+                ], .when(platforms: [.macOS])),
+                // Runtime search paths (rpath)
+                .unsafeFlags(["-Xlinker","-rpath","-Xlinker", tfLib], .when(platforms: [.linux])),
                 .unsafeFlags([
                     "-Xlinker","-rpath","-Xlinker", tfLib,
                     "-Xlinker","-rpath","-Xlinker","/opt/homebrew/opt/libtensorflow/lib",
@@ -92,34 +123,25 @@ let package = Package(
             ]
         ),
 
-        // Tests (runner is a binary -> embed rpaths here too)
+        // Tests (test runner is a binary => needs rpath too)
         .testTarget(
             name: "TF4SwiftCoreTests",
             dependencies: ["TF4SwiftCore", "TF4SwiftOps"],
             path: "Tests/TF4SwiftCoreTests",
             linkerSettings: [
+                .unsafeFlags(["-L", tfLib], .when(platforms: [.linux])),
                 .unsafeFlags([
                     "-L", tfLib,
                     "-L", "/opt/homebrew/opt/libtensorflow/lib",
                     "-L", "/usr/local/opt/libtensorflow/lib"
-                ], .when(platforms: [.macOS, .linux])),
-
+                ], .when(platforms: [.macOS])),
+                .unsafeFlags(["-Xlinker","-rpath","-Xlinker", tfLib], .when(platforms: [.linux])),
                 .unsafeFlags([
                     "-Xlinker","-rpath","-Xlinker", tfLib,
                     "-Xlinker","-rpath","-Xlinker","/opt/homebrew/opt/libtensorflow/lib",
                     "-Xlinker","-rpath","-Xlinker","/usr/local/opt/libtensorflow/lib"
                 ], .when(platforms: [.macOS]))
             ]
-        ),
-
-        // Add this alongside your existing testTarget("TF4SwiftCoreTests", ...)
-.testTarget(
-    name: "TF4SwiftOpGenTests",
-    dependencies: ["TF4SwiftOpGen"],
-    path: "Tests/TF4SwiftOpGenTests"
-),
-
-
-
+        )
     ]
 )

@@ -1,0 +1,116 @@
+name: CI (Swift DEV snapshots + TensorFlow C 2.19.0)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: swift ${{ matrix.swift }}-DEV on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Explicit runners avoid -latest drift (GitHub moved to macos-15 in 2025)
+        os: [ubuntu-22.04, ubuntu-24.04, macos-15]
+        # Use 6.2 development snapshots; add '6.3' when you want to test the next line too
+        swift: ['6.2']
+
+    # Keep nvcc/nvc++ from hijacking SPM's C/C++ compiles
+    env:
+      CC: clang
+      CXX: clang++
+      CUDAHOSTCXX: ""
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Swift DEVELOPMENT SNAPSHOT on both macOS & Linux
+      # SwiftyLab/setup-swift supports 'development: true' and works across OSes.
+      # It fetches the latest 6.2-DEVELOPMENT-SNAPSHOT-YYYY-MM-DD-a from swift.org.
+      - name: Setup Swift (development snapshot)
+        uses: SwiftyLab/setup-swift@latest
+        with:
+          swift-version: ${{ matrix.swift }}
+          development: true
+          check-latest: true
+      - name: Show Swift toolchain
+        run: swift --version
+
+      # On macOS, point builds/tests at the installed snapshot toolchain explicitly
+      - name: Select Swift toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: echo "SWIFT_CMD=xcrun --toolchain $TOOLCHAINS swift" >> $GITHUB_ENV
+      - name: Select Swift toolchain (Linux)
+        if: runner.os != 'macOS'
+        run: echo "SWIFT_CMD=swift" >> $GITHUB_ENV
+
+      # Optional: verify the snapshot exposes the AD feature flag
+      # Swift 6.2+ supports `swift -print-supported-features` (JSON)
+      - name: Check Differentiable feature availability
+        run: |
+          $SWIFT_CMD -print-supported-features | (grep -i "differentiable" || true)
+
+      # Homebrew is preinstalled on macOS; enable it on Ubuntu runners
+      - name: Setup Homebrew (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu-')
+        uses: Homebrew/actions/setup-homebrew@v2
+
+      # Install TensorFlow C **2.19.0** via Homebrew (works on macOS & Linux)
+      - name: Install libtensorflow 2.19.0
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew update
+          brew install libtensorflow
+          PREFIX="$(brew --prefix libtensorflow)"
+          # Validate we’re on 2.19.0 (fail if Homebrew moves ahead)
+          ver=$(brew info --json=v2 libtensorflow | python3 - <<'PY'
+          import sys,json; print(json.load(sys.stdin)["formulae"][0]["versions"]["stable"])
+          PY
+          )
+          echo "Installed libtensorflow version: $ver"
+          test "$ver" = "2.19.0"
+          # Export for Package.swift (your manifest reads these)
+          echo "LIBTENSORFLOW_INCLUDEDIR=$PREFIX/include" >> "$GITHUB_ENV"
+          echo "LIBTENSORFLOW_LIBDIR=$PREFIX/lib" >> "$GITHUB_ENV"
+          # Runtime search path for the runner
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "LD_LIBRARY_PATH=$PREFIX/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          else
+            echo "DYLD_LIBRARY_PATH=$PREFIX/lib:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          fi
+
+      # Cache SwiftPM build artifacts
+      - name: Cache .build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-${{ matrix.swift }}-DEV-build-${{ hashFiles('**/Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-${{ matrix.swift }}-DEV-build-
+            ${{ runner.os }}-swift-${{ matrix.swift }}-
+
+      - name: Build
+        run: $SWIFT_CMD build -v
+
+      - name: Test
+        run: $SWIFT_CMD test -v
+
+      - name: Sanity (tf4swift-opgen --help)
+        run: ./.build/debug/tf4swift-opgen --help || true
+
+      - name: Upload opgen artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf4swift-opgen-${{ matrix.os }}-swift-${{ matrix.swift }}-DEV
+          path: .build/debug/tf4swift-opgen
