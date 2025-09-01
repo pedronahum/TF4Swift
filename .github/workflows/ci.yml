@@ -21,7 +21,7 @@ jobs:
         swift: ['6.2']   # add '6.3' when you're ready
 
     env:
-      # Keep nvcc/nvc++ from hijacking C/C++ compiles under SwiftPM
+      # Ensure clang/clang++ are used for C/C++ code under SwiftPM
       CC: clang
       CXX: clang++
       CUDAHOSTCXX: ""
@@ -41,20 +41,21 @@ jobs:
           swift-version: ${{ matrix.swift }}
           development: true
           check-latest: true
+
       - name: Show Swift toolchain
         run: swift --version
 
-      # (Optional) feature sanity: Differentiable Programming flag
+      # (Optional) sanity check for Differentiable Programming feature presence
       - name: Check Differentiable feature availability
         run: |
           swift -print-supported-features | (grep -i "differentiable" || true)
 
-      # Enable Homebrew on Ubuntu runners (preinstalled but not on PATH)
+      # Enable Homebrew on Ubuntu runners (installed but not on PATH by default)
       - name: Setup Homebrew (Ubuntu)
         if: startsWith(matrix.os, 'ubuntu-')
         uses: Homebrew/actions/setup-homebrew@main
 
-      # Install TensorFlow C via Homebrew on both OSes and assert 2.19.0
+      # Install TensorFlow C via Homebrew on both OSes; assert 2.19.0
       - name: Install libtensorflow 2.19.0
         shell: bash
         run: |
@@ -63,7 +64,7 @@ jobs:
           brew install libtensorflow
           PREFIX="$(brew --prefix libtensorflow)"
 
-          # Version check without JSON (handles 2.19.0_1 etc.)
+          # Robust version check (accepts 2.19.0 and 2.19.0_1, etc.)
           ver="$(brew list --versions libtensorflow | awk '{print $2}')"
           echo "Installed libtensorflow version: $ver"
           case "$ver" in
@@ -71,11 +72,18 @@ jobs:
             *) echo "ERROR: expected 2.19.0 but got $ver" >&2; exit 1 ;;
           esac
 
-          # Export for Package.swift (manifest reads these)
+          # Prove headers are present (helps debug include-path issues)
+          ls -la "$PREFIX/include/tensorflow/c/" || true
+          test -f "$PREFIX/include/tensorflow/c/c_api.h"
+
+          # Export for Package.swift (your manifest reads these)
           echo "LIBTENSORFLOW_INCLUDEDIR=$PREFIX/include" >> "$GITHUB_ENV"
           echo "LIBTENSORFLOW_LIBDIR=$PREFIX/lib" >> "$GITHUB_ENV"
 
-          # Ensure runtime can find libtensorflow.{so,dylib}
+          # Make Clang see headers even if a layer misses -I
+          echo "CPATH=$PREFIX/include:${CPATH:-}" >> "$GITHUB_ENV"
+
+          # Ensure the runner can locate the dylib/so at runtime
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             echo "LD_LIBRARY_PATH=$PREFIX/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
           else
@@ -92,15 +100,33 @@ jobs:
             ${{ runner.os }}-swift-${{ matrix.swift }}-DEV-build-
             ${{ runner.os }}-swift-${{ matrix.swift }}-
 
+      # Build with explicit include/lib/rpath flags (belts & suspenders for macOS)
       - name: Build
-        run: swift build -v
+        shell: bash
+        run: |
+          set -euxo pipefail
+          swift build -v \
+            -Xcc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xswiftc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
+            -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
 
+      # Test with the same flags
       - name: Test
-        run: swift test -v
+        shell: bash
+        run: |
+          set -euxo pipefail
+          swift test -v \
+            -Xcc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xswiftc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
+            -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
 
+      # Sanity: the CLI should link & run (help exits 0 or 2 depending on args)
       - name: Sanity (tf4swift-opgen --help)
         run: ./.build/debug/tf4swift-opgen --help || true
 
+      # Artifact for quick debugging or sharing the tool
       - name: Upload opgen artifact
         if: always()
         uses: actions/upload-artifact@v4
