@@ -45,6 +45,10 @@ let package = Package(
         .library(name: "TF4SwiftOps",  targets: ["TF4SwiftOps"]),
         .executable(name: "tf4swift-opgen", targets: ["TF4SwiftOpGen"]),
     ],
+    .package(
+      url: "https://github.com/apple/swift-protobuf.git",
+      from: "1.25.0"
+    ),
     targets: [
         // C shim over TensorFlow C API
         .target(
@@ -100,7 +104,11 @@ let package = Package(
         // Op generator binary — embed rpaths here so it can find libtensorflow at runtime
         .executableTarget(
             name: "TF4SwiftOpGen",
-            dependencies: ["TF4SwiftCore"],
+            dependencies: [
+                "TF4SwiftCore",
+                // Minimal protobuf decoding of tensorflow.OpList:
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+                ],
             path: "Sources/TF4SwiftOpGen",
             resources: [
                 .copy("ops.pbtxt")
