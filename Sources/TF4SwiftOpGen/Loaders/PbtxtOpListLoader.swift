@@ -38,18 +38,14 @@ public enum PbtxtOpListLoader {
         }
 
         if let n = opName, !n.isEmpty {
-          var def = TFMinimal.OpDef()
-          def.name = n
-          ops.append(def)
+          ops.append(TFMinimal.OpDef(name: n))
         }
         continue
       }
       i += 1
     }
 
-    var out = TFMinimal.OpList()
-    out.op = ops
-    return out
+    return TFMinimal.OpList(op: ops)
   }
 
   private static func countChar(_ s: String, _ ch: Character) -> Int {

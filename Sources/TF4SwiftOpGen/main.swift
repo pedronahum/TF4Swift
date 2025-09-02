@@ -60,3 +60,15 @@ do {
     eprint("❌ tf4swift-opgen error: \(error)\n")
     exit(1)
 }
+
+import TF4SwiftCore
+// In tf4swift-opgen target:
+do {
+  let list = try RuntimeOpListLoader.load()
+  print("Runtime op count:", list.op.count)
+  // e.g., check one or two expected ops:
+  let names = Set(list.op.map(\.name))
+  print("Has AddV2:", names.contains("AddV2"))
+} catch {
+  print("Runtime loader failed:", error)
+}

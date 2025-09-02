@@ -45,10 +45,8 @@ let package = Package(
         .library(name: "TF4SwiftOps",  targets: ["TF4SwiftOps"]),
         .executable(name: "tf4swift-opgen", targets: ["TF4SwiftOpGen"]),
     ],
-    .package(
-      url: "https://github.com/apple/swift-protobuf.git",
-      from: "1.25.0"
-    ),
+    // No external package dependencies are needed now.
+    dependencies: [],
     targets: [
         // C shim over TensorFlow C API
         .target(
@@ -73,7 +71,6 @@ let package = Package(
             name: "TF4SwiftCore",
             dependencies: ["CTensorFlow"],
             path: "Sources/TF4SwiftCore",
-            // Help the Clang importer see TF headers
             swiftSettings: [
                 .unsafeFlags(["-Xcc","-I","-Xcc", tfInclude], .when(platforms: [.linux])),
                 .unsafeFlags([
@@ -106,9 +103,7 @@ let package = Package(
             name: "TF4SwiftOpGen",
             dependencies: [
                 "TF4SwiftCore",
-                // Minimal protobuf decoding of tensorflow.OpList:
-                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
-                ],
+            ],
             path: "Sources/TF4SwiftOpGen",
             resources: [
                 .copy("ops.pbtxt")
