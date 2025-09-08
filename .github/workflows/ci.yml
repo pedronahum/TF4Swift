@@ -61,7 +61,14 @@ jobs:
         run: |
           set -euxo pipefail
           brew update
-          brew install libtensorflow
+          for i in 1 2 3; do
+            if brew install libtensorflow; then
+              break
+            fi
+            echo "brew install libtensorflow failed (attempt $i), retrying in 30s" >&2
+            sleep 30
+          done
+          brew list libtensorflow >/dev/null || { echo "ERROR: failed to install libtensorflow" >&2; exit 1; }
           PREFIX="$(brew --prefix libtensorflow)"
 
           # Robust version check (accepts 2.19.0 and 2.19.0_1, etc.)
