@@ -37,7 +37,7 @@ public struct ApiDefIndex: Sendable {
     var map: [String: ApiDefRecord] = [:]
     for rec in records {
       // Merge endpoints if the same op shows up multiple times (rare).
-      if var existing = map[rec.graphOpName] {
+      if let existing = map[rec.graphOpName] {
         var merged = existing
         var seen = Set(existing.endpoints)
         for e in rec.endpoints where !seen.contains(e) {
