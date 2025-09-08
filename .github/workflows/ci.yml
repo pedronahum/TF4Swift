@@ -111,6 +111,13 @@ jobs:
             -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
             -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
 
+          # Also ensure release configuration links cleanly (catches rpath/ODR issues)
+          swift build -v -c release \
+            -Xcc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xswiftc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
+            -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
+
       # Test with the same flags
       - name: Test
         shell: bash
@@ -122,9 +129,18 @@ jobs:
             -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
             -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
 
+          # And in release, for good measure
+          swift test -v -c release \
+            -Xcc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xswiftc -I"$LIBTENSORFLOW_INCLUDEDIR" \
+            -Xlinker -L"$LIBTENSORFLOW_LIBDIR" \
+            -Xlinker -rpath -Xlinker "$LIBTENSORFLOW_LIBDIR"
+
       # Sanity: the CLI should link & run (help exits 0 or 2 depending on args)
       - name: Sanity (tf4swift-opgen --help)
-        run: ./.build/debug/tf4swift-opgen --help || true
+        run: |
+          ./.build/debug/tf4swift-opgen --help || true
+          ./.build/release/tf4swift-opgen --help || true
 
       # Artifact for quick debugging or sharing the tool
       - name: Upload opgen artifact
@@ -132,4 +148,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tf4swift-opgen-${{ matrix.os }}-swift-${{ matrix.swift }}-DEV
-          path: .build/debug/tf4swift-opgen
+          path: |
+            .build/debug/tf4swift-opgen
+            .build/release/tf4swift-opgen
